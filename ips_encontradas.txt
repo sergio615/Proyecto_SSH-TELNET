@@ -1,0 +1,100 @@
+200.0.91.164|23|Bicentel SA de CV
+200.122.199.162|22|CENTRO CIENTIFICO INTERNACIONAL DE MEDIC - ACP-3678695
+201.131.201.214|22|Computadoras y Servicios Especiales SA de CV
+45.5.93.57|22|Señal Interactiva, S.A De C.V
+147.78.1.143|22|Oneprovider.com - Mexico City Infrastructure
+177.240.7.126|22|Mega Cable, S.A. de C.V.
+177.227.81.103|22|Mega Cable, S.A. de C.V.
+187.141.152.178|22|Uninet S.A. de C.V.
+186.168.238.133|22|COLOMBIA TELECOMUNICACIONES S.A. ESP
+201.148.3.14|23|Operbes, S.A. de C.V.
+181.129.174.225|22|EPM Telecomunicaciones S.A. E.S.P.
+187.157.206.253|22|None
+152.200.180.253|23|COLOMBIA TELECOMUNICACIONES S.A. ESP
+181.143.182.220|22|EPM Telecomunicaciones S.A. E.S.P.
+187.218.38.177|23|None
+187.218.112.117|23|None
+201.184.40.1|23|EPM Telecomunicaciones S.A. E.S.P.
+177.229.226.79|22|Mega Cable, S.A. de C.V.
+187.218.38.237|22|None
+201.98.35.77|22|None
+78.13.27.27|22|Amazon Data Services Mexico
+201.149.45.26|22|Megacable Comunicaciones de Mexico, S.A. de C.V.
+139.177.97.126|22|Oracle Corporation
+187.146.238.208|22|None
+181.49.198.36|22|Telmex Colombia S.A.
+89.223.88.21|22|G-Core Labs S.A.
+190.85.179.229|23|Telmex Colombia S.A.
+187.237.182.33|23|Uninet S.A. de C.V.
+200.52.71.217|22|Megacable Comunicaciones de Mexico, S.A. de C.V.
+40.233.20.184|22|Oracle Corporation
+201.164.182.213|22|Mega Cable, S.A. de C.V.
+187.130.82.9|22|Uninet S.A. de C.V.
+187.247.247.4|22|Mega Cable, S.A. de C.V.
+177.253.68.18|23|SURAMERICA COMERCIAL S.A.S
+190.99.200.123|22|EMPRESAS MUNICIPALES DE CALI E.I.C.E. E.S.P.
+190.0.244.55|23|SERVICIOS KALA EU
+154.200.147.130|22|Octopus Web Solution Inc
+187.175.195.25|22|Uninet S.A. de C.V.
+201.147.203.14|23|Gestión de direccionamiento UniNet
+200.94.89.175|22|Alestra, S. de R.L. de C.V.
+177.231.95.180|22|Mega Cable, S.A. de C.V.
+170.80.241.221|23|TV CABLE DEL GUADIANA S.A DE C.V.
+190.0.244.84|23|TV CABLE SAN GIL LTDA
+216.238.81.141|22|The Constant Company, LLC
+187.241.102.23|22|Mega Cable, S.A. de C.V.
+34.51.11.68|22|Google LLC
+201.117.198.229|23|Gestión de direccionamiento UniNet
+190.0.244.49|23|SERVICIOS KALA EU
+201.96.226.221|23|Gestión de direccionamiento UniNet
+201.124.178.70|22|Gestión de direccionamiento UniNet
+187.218.19.29|22|None
+201.151.93.180|22|Alestra, S. de R.L. de C.V.
+187.218.220.153|23|None
+190.24.128.34|22|ETB - Colombia
+189.194.83.6|22|Mega Cable, S.A. de C.V.
+149.130.171.89|22|Oracle Corporation
+177.243.239.226|22|Mega Cable, S.A. de C.V.
+200.77.10.78|22|Mega Cable, S.A. de C.V.
+177.225.152.111|22|Mega Cable, S.A. de C.V.
+66.9.187.115|22|SpaceX Services, Inc.
+177.243.229.182|22|Mega Cable, S.A. de C.V.
+187.157.140.129|22|None
+181.49.103.1|23|Telmex Colombia S.A.
+177.225.144.18|22|Mega Cable, S.A. de C.V.
+179.50.12.197|22|Conexcol Cloud Colombia S.A.S.
+201.132.160.182|22|Mega Cable, S.A. de C.V.
+187.153.160.20|22|None
+189.235.54.76|22|None
+201.96.90.57|23|Gestión de direccionamiento UniNet
+181.143.18.218|23|EPM Telecomunicaciones S.A. E.S.P.
+181.129.81.130|22|EPM Telecomunicaciones S.A. E.S.P.
+181.54.208.65|22|Telmex Colombia S.A.
+187.243.99.9|22|Mega Cable, S.A. de C.V.
+186.85.73.116|23|Telmex Colombia S.A.
+34.51.19.49|22|Google LLC
+200.49.244.1|22|Airfaster S.A. de C.V.
+34.51.45.88|22|Google LLC
+189.250.63.27|22|Uninet S.A. de C.V.
+34.51.14.171|22|Google LLC
+78.12.128.8|22|Amazon Data Services Mexico
+187.251.226.110|23|TOTAL PLAY TELECOMUNICACIONES SA DE CV
+201.144.244.116|22|Gestión de direccionamiento UniNet
+187.189.59.213|22|TOTAL PLAY TELECOMUNICACIONES SA DE CV
+186.117.205.237|22|COLOMBIA TELECOMUNICACIONES S.A. ESP BIC
+147.28.223.149|22|Equinix Services, Inc.
+216.238.73.19|22|The Constant Company, LLC
+207.248.50.253|23|Television Internacional, S.A. de C.V.
+187.244.92.79|22|Mega Cable, S.A. de C.V.
+187.130.216.33|23|Uninet S.A. de C.V.
+154.200.150.87|22|Octopus Web Solution Inc
+201.144.114.46|23|Gestión de direccionamiento UniNet
+159.54.156.154|22|Oracle Corporation
+181.130.102.152|22|EPM Telecomunicaciones S.A. E.S.P.
+154.93.76.11|22|Bedge Co Limited
+177.241.79.22|22|Mega Cable, S.A. de C.V.
+181.48.219.117|23|Telmex Colombia S.A.
+181.57.177.193|22|Telmex Colombia S.A.
+140.84.161.0|22|Oracle Corporation
+187.216.111.178|22|None
+177.225.138.136|22|Mega Cable, S.A. de C.V.
